@@ -1,6 +1,5 @@
 // netlify/functions/send-email.js
 import fetch from "node-fetch";
-
 export async function handler(event, context) {
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
