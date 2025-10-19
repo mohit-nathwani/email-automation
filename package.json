@@ -1,0 +1,10 @@
+{
+  "name": "email-automation",
+  "version": "1.0.0",
+  "description": "Email automation tool using Netlify + Supabase + Brevo",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
