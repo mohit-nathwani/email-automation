@@ -1,34 +1,30 @@
 // netlify/functions/send-queued.js
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseClient } from './_supabaseClient.js';
 
-// Use built-in fetch (no imports needed)
 export async function handler() {
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_KEY = process.env.SUPABASE_KEY;
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const supabase = getSupabaseClient();
 
   // 1️⃣ Find the next queued email
   const { data: queuedEmails, error } = await supabase
     .from('email_queue')
     .select('*')
     .eq('status', 'queued')
-    .lt('scheduled_at', new Date().toISOString())
+    .lte('scheduled_at', new Date().toISOString())
     .limit(1);
 
   if (error) {
-    console.error('Error fetching email:', error);
+    console.error('❌ Error fetching email:', error);
     return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
   }
 
   if (!queuedEmails || queuedEmails.length === 0) {
-    console.log('No emails to send');
-    return { statusCode: 200, body: 'No queued emails found' };
+    console.log('No queued emails to send.');
+    return { statusCode: 200, body: JSON.stringify({ message: 'No queued emails' }) };
   }
 
   const email = queuedEmails[0];
-  console.log('Sending email to:', email.email);
+  console.log('📤 Sending email to:', email.email);
 
   // 2️⃣ Send email via Brevo
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -49,22 +45,22 @@ export async function handler() {
   const result = await response.json();
 
   if (result.messageId) {
-    // 3️⃣ Mark as sent
+    // ✅ Update status to sent
     await supabase
       .from('email_queue')
       .update({ status: 'sent', sent_at: new Date().toISOString() })
       .eq('id', email.id);
 
-    console.log('✅ Email sent to:', email.email);
+    console.log('✅ Email sent successfully to', email.email);
     return { statusCode: 200, body: JSON.stringify({ sent: email.email }) };
   } else {
-    // 4️⃣ Mark as failed
+    // ❌ Mark as failed
     await supabase
       .from('email_queue')
       .update({ status: 'failed', error_message: JSON.stringify(result) })
       .eq('id', email.id);
 
-    console.error('❌ Failed to send email:', result);
+    console.error('Failed to send email:', result);
     return { statusCode: 500, body: JSON.stringify(result) };
   }
 }
