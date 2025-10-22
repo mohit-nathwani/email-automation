@@ -6,30 +6,29 @@ export async function handler() {
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
   try {
-    // Fetch one pending email
-    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    // 1️⃣ Fetch one pending email
+    const { data: emails } = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }).then(res => res.json());
 
-    const { data: email, error } = await supabase
-      .from("email_queue_v2")
-      .select("*")
-      .eq("status", "pending")
-      .order("scheduled_time", { ascending: true })
-      .limit(1)
-      .single();
-
-    if (error || !email) {
+    if (!emails || emails.length === 0) {
       return {
         statusCode: 200,
         body: JSON.stringify({ message: "No pending emails found" }),
       };
     }
 
-    // Send via Brevo API
-    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    const email = emails[0];
+
+    // 2️⃣ Send email via Brevo API
+    const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
-        "accept": "application/json",
+        accept: "application/json",
         "api-key": BREVO_API_KEY,
         "content-type": "application/json",
       },
@@ -41,17 +40,22 @@ export async function handler() {
       }),
     });
 
-    const result = await response.json();
+    const brevoResult = await brevoResponse.json();
 
-    // Update Supabase status
-    await supabase
-      .from("email_queue_v2")
-      .update({ status: "sent", sent_at: new Date().toISOString() })
-      .eq("id", email.id);
+    // 3️⃣ Update status in Supabase
+    await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
+      method: "PATCH",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status: "sent", sent_at: new Date().toISOString() }),
+    });
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: "Email sent!", email, brevoResult: result }),
+      body: JSON.stringify({ message: "Email sent!", email, brevoResult }),
     };
   } catch (err) {
     console.error("Error:", err);
