@@ -5,6 +5,10 @@ export async function handler() {
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
   const MAILTRAP_API_KEY = process.env.MAILTRAP_API_KEY;
 
+    // 🔍 Debug logs
+  console.log("🔑 SUPABASE_URL:", SUPABASE_URL);
+  console.log("🔑 SUPABASE_KEY length:", SUPABASE_KEY?.length);
+
   const senders = [
     { name: "Mohit Nathwani", email: "mohitnathwani@outlook.com" },
     { name: "Mohit Nathwani", email: "mohit.asc@outlook.com" },
