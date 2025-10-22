@@ -6,39 +6,37 @@ export async function handler() {
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
   try {
-// 1️⃣ Fetch one pending email
-const res = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
-  headers: {
-    apikey: SUPABASE_KEY,
-    Authorization: `Bearer ${SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-  },
-});
+    // 1️⃣ Fetch one pending email
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-const emails = await res.json();
+    const emails = await res.json();
 
-if (!emails || emails.length === 0) {
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: "No pending emails found" }),
-  };
-}
+    if (!emails || emails.length === 0) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: "No pending emails found" }),
+      };
+    }
 
-    // 2️⃣ Fetch current rotation index from Supabase
-    const trackerRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-        },
-      }
-    );
+    const email = emails[0]; // ✅ Declare email properly here
 
+    // 2️⃣ Fetch rotation tracker
+    const trackerRes = await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+      },
+    });
     const trackerData = await trackerRes.json();
     let lastIndex = trackerData?.[0]?.last_used_index || 0;
 
-    // 3️⃣ Define sender list (update these with your actual verified senders)
+    // 3️⃣ Define sender list
     const senders = [
       "mohitnathwani@outlook.com",
       "mohit.asc@outlook.com",
@@ -51,7 +49,7 @@ if (!emails || emails.length === 0) {
 
     console.log("🌀 Using sender:", sender);
 
-    // 4️⃣ Send email via Brevo API
+    // 4️⃣ Send email through Brevo
     const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -69,7 +67,7 @@ if (!emails || emails.length === 0) {
 
     const brevoResult = await brevoResponse.json();
 
-    // 5️⃣ Update rotation tracker for next run
+    // 5️⃣ Update rotation tracker
     await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`, {
       method: "PATCH",
       headers: {
@@ -84,7 +82,7 @@ if (!emails || emails.length === 0) {
       }),
     });
 
-    // 6️⃣ Mark email as sent
+    // 6️⃣ Update email status
     await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
       method: "PATCH",
       headers: {
@@ -101,7 +99,7 @@ if (!emails || emails.length === 0) {
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: "Email sent!",
+        message: "Email sent successfully!",
         used_sender: sender,
         email,
         brevoResult,
