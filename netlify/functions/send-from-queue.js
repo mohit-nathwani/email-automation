@@ -1,42 +1,60 @@
 // netlify/functions/send-from-queue.js
+
 export async function handler() {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
-  // ✅ Your four verified senders
-  const SENDERS = [
-    { name: "Mohit Nathwani", email: "mohitnathwani@outlook.com" },
-    { name: "Mohit Nathwani", email: "mohit.asc@outlook.com" },
-    { name: "Mohit Nathwani", email: "nathwanimohit@yahoo.com" },
-    { name: "Mohit Nathwani", email: "hiremohit@yahoo.com" },
-  ];
-
-  // 🧠 Keep track of the next sender index (stored in memory per function)
-  let lastUsedIndex = 0;
-
   try {
     // 1️⃣ Fetch one pending email
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const { data: emails } = await fetch(
+      `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    ).then((res) => res.json());
 
-    const emails = await res.json();
     if (!emails || emails.length === 0) {
-      return { statusCode: 200, body: JSON.stringify({ message: "No pending emails found" }) };
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: "No pending emails found" }),
+      };
     }
 
     const email = emails[0];
 
-    // 2️⃣ Pick sender sequentially
-    const sender = SENDERS[lastUsedIndex];
-    lastUsedIndex = (lastUsedIndex + 1) % SENDERS.length; // cycle back after last one
+    // 2️⃣ Fetch current rotation index from Supabase
+    const trackerRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+      }
+    );
 
-    // 3️⃣ Send via Brevo API
+    const trackerData = await trackerRes.json();
+    let lastIndex = trackerData?.[0]?.last_used_index || 0;
+
+    // 3️⃣ Define sender list (update these with your actual verified senders)
+    const senders = [
+      "mohitnathwani@outlook.com",
+      "mohit.asc@outlook.com",
+      "nathwanimohit@yahoo.com",
+      "hiremohit@yahoo.com",
+    ];
+
+    const senderIndex = (lastIndex + 1) % senders.length;
+    const sender = senders[senderIndex];
+
+    console.log("🌀 Using sender:", sender);
+
+    // 4️⃣ Send email via Brevo API
     const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -45,7 +63,7 @@ export async function handler() {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        sender,
+        sender: { name: "Mohit Nathwani", email: sender },
         to: [{ email: email.to_email }],
         subject: email.subject,
         htmlContent: email.body,
@@ -54,7 +72,22 @@ export async function handler() {
 
     const brevoResult = await brevoResponse.json();
 
-    // 4️⃣ Update status in Supabase
+    // 5️⃣ Update rotation tracker for next run
+    await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`, {
+      method: "PATCH",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        last_used_index: senderIndex,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+
+    // 6️⃣ Mark email as sent
     await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
       method: "PATCH",
       headers: {
@@ -65,16 +98,23 @@ export async function handler() {
       body: JSON.stringify({
         status: "sent",
         sent_at: new Date().toISOString(),
-        used_sender: sender.email,
       }),
     });
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: "Email sent!", sender, brevoResult }),
+      body: JSON.stringify({
+        message: "Email sent!",
+        used_sender: sender,
+        email,
+        brevoResult,
+      }),
     };
   } catch (err) {
-    console.error("Error:", err);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
+    console.error("❌ Error:", err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: err.message }),
+    };
   }
 }
