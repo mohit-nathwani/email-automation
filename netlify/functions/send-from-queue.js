@@ -3,19 +3,39 @@
 export async function handler() {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
-  const BREVO_API_KEY = process.env.BREVO_API_KEY;
+  const MAILTRAP_API_KEY = process.env.MAILTRAP_API_KEY;
+
+  const senders = [
+    { name: "Mohit Nathwani", email: "mohitnathwani@outlook.com" },
+    { name: "Mohit Nathwani", email: "mohit.asc@outlook.com" },
+    { name: "Mohit Nathwani", email: "hire_mohit@outlook.com" },
+    { name: "Mohit Nathwani", email: "hire_mohit@hotmail.com" },
+    { name: "Mohit Nathwani", email: "mohitnathwani@hotmail.com" },
+  ];
 
   try {
-    // 1️⃣ Fetch one pending email
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
+    // 1️⃣ Fetch rotation tracker
+    const { data: trackerData } = await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+      },
+    }).then((res) => res.json());
+
+    let lastUsedIndex = trackerData?.[0]?.last_used_index ?? -1;
+    const nextIndex = (lastUsedIndex + 1) % senders.length;
+    const sender = senders[nextIndex];
+
+    console.log("🌀 Using sender:", sender.email);
+
+    // 2️⃣ Fetch one pending email
+    const { data: emails } = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
       headers: {
         apikey: SUPABASE_KEY,
         Authorization: `Bearer ${SUPABASE_KEY}`,
         "Content-Type": "application/json",
       },
-    });
-
-    const emails = await res.json();
+    }).then((res) => res.json());
 
     if (!emails || emails.length === 0) {
       return {
@@ -24,48 +44,40 @@ export async function handler() {
       };
     }
 
-    const email = emails[0]; // ✅ Declare email properly here
+    const email = emails[0];
 
-    // 2️⃣ Fetch rotation tracker
-    const trackerRes = await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-      },
-    });
-    const trackerData = await trackerRes.json();
-    let lastIndex = trackerData?.[0]?.last_used_index || 0;
-
-    // 3️⃣ Define sender list
-const senders = [
-  "MohitNathwani@outlook.com"
-];
-
-
-    const senderIndex = (lastIndex + 1) % senders.length;
-    const sender = senders[senderIndex];
-
-    console.log("🌀 Using sender:", sender);
-
-    // 4️⃣ Send email through Brevo
-    const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
+    // 3️⃣ Send email via Mailtrap
+    const response = await fetch("https://send.api.mailtrap.io/api/send", {
       method: "POST",
       headers: {
-        accept: "application/json",
-        "api-key": BREVO_API_KEY,
-        "content-type": "application/json",
+        Authorization: `Bearer ${MAILTRAP_API_KEY}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        sender: { name: "Mohit Nathwani", email: sender },
+        from: {
+          email: sender.email,
+          name: sender.name,
+        },
         to: [{ email: email.to_email }],
         subject: email.subject,
-        htmlContent: email.body,
+        text: email.body.replace(/<\/?[^>]+(>|$)/g, ""), // strip HTML
+        html: email.body,
       }),
     });
 
-    const brevoResult = await brevoResponse.json();
-    console.log("📬 Brevo API response:", brevoResult);
+    const result = await response.json();
+    console.log("📬 Mailtrap API response:", result);
 
+    // 4️⃣ Mark email as sent in Supabase
+    await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
+      method: "PATCH",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status: "sent", sent_at: new Date().toISOString() }),
+    });
 
     // 5️⃣ Update rotation tracker
     await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`, {
@@ -74,42 +86,26 @@ const senders = [
         apikey: SUPABASE_KEY,
         Authorization: `Bearer ${SUPABASE_KEY}`,
         "Content-Type": "application/json",
-        Prefer: "return=representation",
       },
       body: JSON.stringify({
-        last_used_index: senderIndex,
+        last_used_index: nextIndex,
         updated_at: new Date().toISOString(),
-      }),
-    });
-
-    // 6️⃣ Update email status
-    await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
-      method: "PATCH",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        status: "sent",
-        sent_at: new Date().toISOString(),
       }),
     });
 
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: "Email sent successfully!",
-        used_sender: sender,
-        email,
-        brevoResult,
+        message: "Email sent successfully",
+        used_sender: sender.email,
+        result,
       }),
     };
-  } catch (err) {
-    console.error("❌ Error:", err);
+  } catch (error) {
+    console.error("❌ Error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message }),
+      body: JSON.stringify({ error: error.message }),
     };
   }
 }
