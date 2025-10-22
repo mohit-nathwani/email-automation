@@ -64,6 +64,8 @@ const senders = [
     });
 
     const brevoResult = await brevoResponse.json();
+    console.log("📬 Brevo API response:", brevoResult);
+
 
     // 5️⃣ Update rotation tracker
     await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`, {
