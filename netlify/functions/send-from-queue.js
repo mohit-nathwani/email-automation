@@ -1,5 +1,4 @@
 // netlify/functions/send-from-queue.js
-
 export async function handler() {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -7,13 +6,15 @@ export async function handler() {
 
   try {
     // 1️⃣ Fetch one pending email
-    const { data: emails } = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
       headers: {
         apikey: SUPABASE_KEY,
         Authorization: `Bearer ${SUPABASE_KEY}`,
         "Content-Type": "application/json",
       },
-    }).then(res => res.json());
+    });
+
+    const emails = await res.json(); // 👈 fix — directly use res.json()
 
     if (!emails || emails.length === 0) {
       return {
