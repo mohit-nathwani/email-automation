@@ -6,26 +6,23 @@ export async function handler() {
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
   try {
-    // 1️⃣ Fetch one pending email
-    const { data: emails } = await fetch(
-      `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    ).then((res) => res.json());
+// 1️⃣ Fetch one pending email
+const res = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
+  headers: {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+  },
+});
 
-    if (!emails || emails.length === 0) {
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ message: "No pending emails found" }),
-      };
-    }
+const emails = await res.json();
 
-    const email = emails[0];
+if (!emails || emails.length === 0) {
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ message: "No pending emails found" }),
+  };
+}
 
     // 2️⃣ Fetch current rotation index from Supabase
     const trackerRes = await fetch(
