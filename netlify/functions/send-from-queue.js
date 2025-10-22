@@ -37,12 +37,14 @@ export async function handler() {
     let lastIndex = trackerData?.[0]?.last_used_index || 0;
 
     // 3️⃣ Define sender list
-    const senders = [
-      "mohitnathwani@outlook.com",
-      "mohit.asc@outlook.com",
-      "nathwanimohit@yahoo.com",
-      "hiremohit@yahoo.com",
-    ];
+const senders = [
+  "mohitnathwani@outlook.com",
+  "Mohit.ASC@outlook.com",
+  "MohitNathwani@outlook.com",
+  "Hire_Mohit@outlook.com",
+  "Hire_Mohit@Hotmail.com"
+];
+
 
     const senderIndex = (lastIndex + 1) % senders.length;
     const sender = senders[senderIndex];
