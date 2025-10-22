@@ -38,10 +38,10 @@ export async function handler() {
 
     // 3️⃣ Define sender list
 const senders = [
-  "mohitnathwani@outlook.com",
-  "Mohit.ASC@outlook.com",
+  //"mohitnathwani@outlook.com",
+  //"Mohit.ASC@outlook.com",
   "MohitNathwani@outlook.com",
-  "Hire_Mohit@outlook.com",
+  //"Hire_Mohit@outlook.com",
   "Hire_Mohit@Hotmail.com"
 ];
 
