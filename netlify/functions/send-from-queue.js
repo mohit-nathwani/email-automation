@@ -5,7 +5,7 @@ export async function handler() {
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
   const MAILTRAP_API_KEY = process.env.MAILTRAP_API_KEY;
 
-    // 🔍 Debug logs
+  // 🔍 Debug logs
   console.log("🔑 SUPABASE_URL:", SUPABASE_URL);
   console.log("🔑 SUPABASE_KEY length:", SUPABASE_KEY?.length);
 
@@ -33,13 +33,26 @@ export async function handler() {
     console.log("🌀 Using sender:", sender.email);
 
     // 2️⃣ Fetch one pending email
-    const { data: emails } = await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-      },
-    }).then((res) => res.json());
+    const supabaseResponse = await fetch(
+      `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const rawText = await supabaseResponse.text();
+    console.log("🧾 Raw Supabase response:", rawText);
+
+    let emails;
+    try {
+      emails = JSON.parse(rawText);
+    } catch (err) {
+      console.error("❌ JSON parse error:", err.message);
+    }
 
     if (!emails || emails.length === 0) {
       return {
