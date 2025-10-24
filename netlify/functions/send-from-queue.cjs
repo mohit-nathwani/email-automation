@@ -1,4 +1,4 @@
-// netlify/functions/send-from-queue.js
+// netlify/functions/send-from-queue.cjs
 
 export async function handler() {
   const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -11,7 +11,7 @@ export async function handler() {
 
   try {
     // 1️⃣ Get Azure OAuth token
-    const tokenResponse = await fetch(
+    const azureTokenResponse = await fetch(
       `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
       {
         method: "POST",
@@ -25,23 +25,23 @@ export async function handler() {
       }
     );
 
-    const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
+    const azureTokenData = await azureTokenResponse.json();
+    const accessToken = azureTokenData.access_token;
     if (!accessToken) {
       throw new Error("No access token received from Azure");
     }
 
     // 2️⃣ Fetch one pending email
-   const emails = await fetch(
-  `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
-  {
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-    },
-  }
-).then((res) => res.json());
+    const emails = await fetch(
+      `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    ).then((res) => res.json());
 
     console.log("📬 Supabase pending emails:", emails);
 
@@ -54,61 +54,41 @@ export async function handler() {
 
     const email = emails[0];
 
-// 3️⃣ Send email via Microsoft Graph API (Outlook)
-const tokenResponse = await fetch(
-  `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.AZURE_CLIENT_ID,
-      client_secret: process.env.AZURE_CLIENT_SECRET,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    }),
-  }
-);
+    // 3️⃣ Send email via Microsoft Graph API (Outlook)
+    console.log("📤 Sending email via Microsoft Graph...");
 
-const tokenData = await tokenResponse.json();
-console.log("🔑 Token response:", tokenData);
-
-if (!tokenData.access_token) {
-  throw new Error("No access token received from Azure");
-}
-
-const sendMailResponse = await fetch(
-  `https://graph.microsoft.com/v1.0/users/${process.env.SENDER_EMAIL}/sendMail`,
-  {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${tokenData.access_token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      message: {
-        subject: email.subject,
-        body: {
-          contentType: "HTML",
-          content: email.body,
+    const sendMailResponse = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${SENDER_EMAIL}/sendMail`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
-        toRecipients: [
-          {
-            emailAddress: { address: email.to_email },
+        body: JSON.stringify({
+          message: {
+            subject: email.subject,
+            body: {
+              contentType: "HTML",
+              content: email.body,
+            },
+            toRecipients: [
+              {
+                emailAddress: { address: email.to_email },
+              },
+            ],
           },
-        ],
-      },
-      saveToSentItems: false,
-    }),
-  }
-);
+          saveToSentItems: false,
+        }),
+      }
+    );
 
-if (!sendMailResponse.ok) {
-  const errText = await sendMailResponse.text();
-  throw new Error(`Email send failed: ${errText}`);
-}
+    if (!sendMailResponse.ok) {
+      const errText = await sendMailResponse.text();
+      throw new Error(`Email send failed: ${errText}`);
+    }
 
-console.log("📬 Email sent successfully via Microsoft Graph");
-  
+    console.log("✅ Email sent successfully via Microsoft Graph");
 
     // 4️⃣ Mark as sent
     await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
@@ -118,7 +98,10 @@ console.log("📬 Email sent successfully via Microsoft Graph");
         Authorization: `Bearer ${SUPABASE_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ status: "sent", sent_at: new Date().toISOString() }),
+      body: JSON.stringify({
+        status: "sent",
+        sent_at: new Date().toISOString(),
+      }),
     });
 
     return {
