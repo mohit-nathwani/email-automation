@@ -1,6 +1,5 @@
 // netlify/functions/send-from-queue.cjs
-
-const fetch = require("node-fetch");
+// No imports needed — Node 18+ has global `fetch`.
 
 exports.handler = async function () {
   const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -12,8 +11,8 @@ exports.handler = async function () {
   const SENDER_EMAIL = process.env.SENDER_EMAIL;
 
   try {
-    // 1️⃣ Get Azure OAuth token
-    const azureTokenResponse = await fetch(
+    // 1) OAuth token from Azure AD (client credentials)
+    const tokenRes = await fetch(
       `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
       {
         method: "POST",
@@ -27,14 +26,19 @@ exports.handler = async function () {
       }
     );
 
-    const azureTokenData = await azureTokenResponse.json();
-    const accessToken = azureTokenData.access_token;
-    if (!accessToken) {
-      throw new Error("No access token received from Azure");
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      console.error("Azure token error:", tokenData);
+      throw new Error(
+        `Azure token request failed (${tokenRes.status}): ${JSON.stringify(
+          tokenData
+        )}`
+      );
     }
+    const accessToken = tokenData.access_token;
 
-    // 2️⃣ Fetch one pending email
-    const emails = await fetch(
+    // 2) Fetch one pending email
+    const pendingRes = await fetch(
       `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
       {
         headers: {
@@ -43,11 +47,17 @@ exports.handler = async function () {
           "Content-Type": "application/json",
         },
       }
-    ).then((res) => res.json());
-
+    );
+    if (!pendingRes.ok) {
+      const txt = await pendingRes.text();
+      throw new Error(
+        `Supabase fetch failed (${pendingRes.status}): ${txt || "no body"}`
+      );
+    }
+    const emails = await pendingRes.json();
     console.log("📬 Supabase pending emails:", emails);
 
-    if (!emails || emails.length === 0) {
+    if (!Array.isArray(emails) || emails.length === 0) {
       return {
         statusCode: 200,
         body: JSON.stringify({ message: "No pending emails found" }),
@@ -56,11 +66,13 @@ exports.handler = async function () {
 
     const email = emails[0];
 
-    // 3️⃣ Send email via Microsoft Graph API (Outlook)
-    console.log("📤 Sending email via Microsoft Graph...");
+    // 3) Send via Microsoft Graph
+    console.log("📤 Sending email via Microsoft Graph as:", SENDER_EMAIL);
 
-    const sendMailResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${SENDER_EMAIL}/sendMail`,
+    const sendRes = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        SENDER_EMAIL
+      )}/sendMail`,
       {
         method: "POST",
         headers: {
@@ -69,15 +81,13 @@ exports.handler = async function () {
         },
         body: JSON.stringify({
           message: {
-            subject: email.subject,
+            subject: email.subject || "",
             body: {
               contentType: "HTML",
-              content: email.body,
+              content: email.body || "",
             },
             toRecipients: [
-              {
-                emailAddress: { address: email.to_email },
-              },
+              { emailAddress: { address: email.to_email } },
             ],
           },
           saveToSentItems: false,
@@ -85,26 +95,43 @@ exports.handler = async function () {
       }
     );
 
-    if (!sendMailResponse.ok) {
-      const errText = await sendMailResponse.text();
-      throw new Error(`Email send failed: ${errText}`);
+    if (!sendRes.ok) {
+      const errText = await sendRes.text();
+      console.error("Graph sendMail error:", errText);
+      throw new Error(
+        `Email send failed (${sendRes.status}): ${errText || "no body"}`
+      );
     }
 
-    console.log("✅ Email sent successfully via Microsoft Graph");
+    console.log("✅ Email sent, marking row as sent…");
 
-    // 4️⃣ Mark as sent
-    await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
-      method: "PATCH",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        status: "sent",
-        sent_at: new Date().toISOString(),
-      }),
-    });
+    // 4) Mark as sent
+    const patchRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          status: "sent",
+          sent_at: new Date().toISOString(),
+        }),
+      }
+    );
+
+    if (!patchRes.ok) {
+      const txt = await patchRes.text();
+      throw new Error(
+        `Supabase update failed (${patchRes.status}): ${txt || "no body"}`
+      );
+    }
+
+    const saved = await patchRes.json();
+    console.log("📝 Updated row:", saved);
 
     return {
       statusCode: 200,
