@@ -32,16 +32,18 @@ export async function handler() {
     }
 
     // 2️⃣ Fetch one pending email
-    const { data: emails } = await fetch(
-      `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    ).then((res) => res.json());
+   const emails = await fetch(
+  `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
+  {
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+    },
+  }
+).then((res) => res.json());
+
+    console.log("📬 Supabase pending emails:", emails);
 
     if (!emails || emails.length === 0) {
       return {
