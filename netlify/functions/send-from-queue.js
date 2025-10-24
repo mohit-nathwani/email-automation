@@ -3,37 +3,36 @@
 export async function handler() {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
-  const MAILTRAP_API_KEY = process.env.MAILTRAP_API_KEY;
 
-  // 🔍 Debug logs
-  console.log("🔑 SUPABASE_URL:", SUPABASE_URL);
-  console.log("🔑 SUPABASE_KEY length:", SUPABASE_KEY?.length);
-
-  const senders = [
-    { name: "Mohit Nathwani", email: "mohitnathwani@outlook.com" },
-    { name: "Mohit Nathwani", email: "mohit.asc@outlook.com" },
-    { name: "Mohit Nathwani", email: "hire_mohit@outlook.com" },
-    { name: "Mohit Nathwani", email: "hire_mohit@hotmail.com" },
-    { name: "Mohit Nathwani", email: "mohitnathwani@hotmail.com" },
-  ];
+  const TENANT_ID = process.env.AZURE_TENANT_ID;
+  const CLIENT_ID = process.env.AZURE_CLIENT_ID;
+  const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
+  const SENDER_EMAIL = process.env.SENDER_EMAIL;
 
   try {
-    // 1️⃣ Fetch rotation tracker
-    const { data: trackerData } = await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker`, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-      },
-    }).then((res) => res.json());
+    // 1️⃣ Get Azure OAuth token
+    const tokenResponse = await fetch(
+      `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          scope: "https://graph.microsoft.com/.default",
+          grant_type: "client_credentials",
+        }),
+      }
+    );
 
-    let lastUsedIndex = trackerData?.[0]?.last_used_index ?? -1;
-    const nextIndex = (lastUsedIndex + 1) % senders.length;
-    const sender = senders[nextIndex];
-
-    console.log("🌀 Using sender:", sender.email);
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      throw new Error("No access token received from Azure");
+    }
 
     // 2️⃣ Fetch one pending email
-    const supabaseResponse = await fetch(
+    const { data: emails } = await fetch(
       `${SUPABASE_URL}/rest/v1/email_queue_v2?status=eq.pending&limit=1`,
       {
         headers: {
@@ -42,17 +41,7 @@ export async function handler() {
           "Content-Type": "application/json",
         },
       }
-    );
-
-    const rawText = await supabaseResponse.text();
-    console.log("🧾 Raw Supabase response:", rawText);
-
-    let emails;
-    try {
-      emails = JSON.parse(rawText);
-    } catch (err) {
-      console.error("❌ JSON parse error:", err.message);
-    }
+    ).then((res) => res.json());
 
     if (!emails || emails.length === 0) {
       return {
@@ -63,29 +52,35 @@ export async function handler() {
 
     const email = emails[0];
 
-    // 3️⃣ Send email via Mailtrap
-    const response = await fetch("https://send.api.mailtrap.io/api/send", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${MAILTRAP_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: {
-          email: sender.email,
-          name: sender.name,
+    // 3️⃣ Send via Microsoft Graph
+    const mailResponse = await fetch(
+      "https://graph.microsoft.com/v1.0/users/" + SENDER_EMAIL + "/sendMail",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
-        to: [{ email: email.to_email }],
-        subject: email.subject,
-        text: email.body.replace(/<\/?[^>]+(>|$)/g, ""), // strip HTML
-        html: email.body,
-      }),
-    });
+        body: JSON.stringify({
+          message: {
+            subject: email.subject,
+            body: {
+              contentType: "HTML",
+              content: email.body,
+            },
+            toRecipients: [{ emailAddress: { address: email.to_email } }],
+          },
+          saveToSentItems: "false",
+        }),
+      }
+    );
 
-    const result = await response.json();
-    console.log("📬 Mailtrap API response:", result);
+    if (!mailResponse.ok) {
+      const errorText = await mailResponse.text();
+      throw new Error(`Email send failed: ${errorText}`);
+    }
 
-    // 4️⃣ Mark email as sent in Supabase
+    // 4️⃣ Mark as sent
     await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
       method: "PATCH",
       headers: {
@@ -96,33 +91,15 @@ export async function handler() {
       body: JSON.stringify({ status: "sent", sent_at: new Date().toISOString() }),
     });
 
-    // 5️⃣ Update rotation tracker
-    await fetch(`${SUPABASE_URL}/rest/v1/rotation_tracker?id=eq.1`, {
-      method: "PATCH",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        last_used_index: nextIndex,
-        updated_at: new Date().toISOString(),
-      }),
-    });
-
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: "Email sent successfully",
-        used_sender: sender.email,
-        result,
+        message: "✅ Email sent successfully via Outlook Graph API",
+        sent_to: email.to_email,
       }),
     };
-  } catch (error) {
-    console.error("❌ Error:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.message }),
-    };
+  } catch (err) {
+    console.error("❌ Error:", err);
+    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 }
