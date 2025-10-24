@@ -1,6 +1,8 @@
 // netlify/functions/send-from-queue.cjs
 
-export async function handler() {
+const fetch = require("node-fetch");
+
+exports.handler = async function () {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
@@ -115,4 +117,4 @@ export async function handler() {
     console.error("❌ Error:", err);
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
-}
+};
