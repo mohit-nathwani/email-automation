@@ -54,33 +54,61 @@ export async function handler() {
 
     const email = emails[0];
 
-    // 3️⃣ Send via Microsoft Graph
-    const mailResponse = await fetch(
-      "https://graph.microsoft.com/v1.0/users/" + SENDER_EMAIL + "/sendMail",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: {
-            subject: email.subject,
-            body: {
-              contentType: "HTML",
-              content: email.body,
-            },
-            toRecipients: [{ emailAddress: { address: email.to_email } }],
-          },
-          saveToSentItems: "false",
-        }),
-      }
-    );
+// 3️⃣ Send email via Microsoft Graph API (Outlook)
+const tokenResponse = await fetch(
+  `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`,
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: process.env.AZURE_CLIENT_ID,
+      client_secret: process.env.AZURE_CLIENT_SECRET,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    }),
+  }
+);
 
-    if (!mailResponse.ok) {
-      const errorText = await mailResponse.text();
-      throw new Error(`Email send failed: ${errorText}`);
-    }
+const tokenData = await tokenResponse.json();
+console.log("🔑 Token response:", tokenData);
+
+if (!tokenData.access_token) {
+  throw new Error("No access token received from Azure");
+}
+
+const sendMailResponse = await fetch(
+  `https://graph.microsoft.com/v1.0/users/${process.env.SENDER_EMAIL}/sendMail`,
+  {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: {
+        subject: email.subject,
+        body: {
+          contentType: "HTML",
+          content: email.body,
+        },
+        toRecipients: [
+          {
+            emailAddress: { address: email.to_email },
+          },
+        ],
+      },
+      saveToSentItems: false,
+    }),
+  }
+);
+
+if (!sendMailResponse.ok) {
+  const errText = await sendMailResponse.text();
+  throw new Error(`Email send failed: ${errText}`);
+}
+
+console.log("📬 Email sent successfully via Microsoft Graph");
+  
 
     // 4️⃣ Mark as sent
     await fetch(`${SUPABASE_URL}/rest/v1/email_queue_v2?id=eq.${email.id}`, {
